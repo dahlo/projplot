@@ -865,7 +865,7 @@ elif options.start and not options.end:
 
 # if the user did something i could not predict
 else:
-	sys.exit("ERROR: What did you do, you broke it! This should not be able to happen.\nPlease email the command you tried to run to martin.dahlo@scilifelab.uu.se\n\n%s" % usage)
+	sys.exit("ERROR: What did you do, you broke it! This should not be able to happen.\nPlease email the command you tried to run to support@uppmax.uu.se\n\n%s" % usage)
 
 
 
