@@ -11,11 +11,11 @@
 
 import sys
 import os
-import datetime
+# import datetime
 import time
 import glob
 import ntpath
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 import re
 import calendar
 import subprocess
@@ -25,9 +25,13 @@ from optparse import OptionParser
 from ConfigParser import SafeConfigParser
 import sqlite3 as lite
 import numpy as np
+import getpass
 
-version = "2015-08-31"
+# if getpass.getuser() == 'dahlo':
+# 	from IPython.core.debugger import Tracer
 
+
+version = "2016-05-24"
 
 
 ### SETTINGS ###
@@ -177,8 +181,9 @@ def getJobs(cur, startDate, endDate, projId):
 
 
 	# get jobs
-	query = "SELECT start,end,cores FROM jobs WHERE proj_id = '%s' AND start < %s AND end > %s and cluster='%s';" % (projId, (int(endDate.strftime('%s'))), (int(startDate.strftime('%s'))), options.cluster)
+	query = "SELECT start,end,cores,job_id FROM jobs WHERE proj_id = '%s' AND start < %s AND end > %s and cluster='%s';" % (projId, (int(endDate.strftime('%s'))), (int(startDate.strftime('%s'))), options.cluster)
 	cur.execute(query)
+
 
 
 	# get the start points epoch time
@@ -188,6 +193,7 @@ def getJobs(cur, startDate, endDate, projId):
 	# initiate stuff
 	starts = np.empty([0,2])
 	stops = np.empty([0,2])
+	jids = dict()
 
 
 	# loop over the jobs
@@ -197,19 +203,24 @@ def getJobs(cur, startDate, endDate, projId):
 		# count the level to start from
 		if int(((job[0]) - windowStartEpoch) ) < 0:
 
+			# Tracer()()
+
 			# save the stop
 			starts = np.append(starts, [[0 , int(job[2])]], 0) 
 			stops = np.append(stops, [[int(((job[1]) - windowStartEpoch) ) , int(job[2])]] , 0) 
+			jids[job[3]] = 1
 
 			continue
 
 		# save the info
 		starts = np.append(starts, [[int(((job[0]) - windowStartEpoch) ) , int(job[2])]], 0) 
-		stops = np.append(stops, [[int(((job[1]) - windowStartEpoch) ) , int(job[2])]], 0) 
+		stops = np.append(stops, [[int(((job[1]) - windowStartEpoch) ) , int(job[2])]], 0)
+		jids[job[3]] = 1
+
 
 
 	# return the arrays
-	return [starts, stops]
+	return [starts, stops, jids]
 
 		
 
@@ -250,18 +261,15 @@ def addPlotData(plotData, starts, stops):
 	stops = stops[stops[:,0].argsort()]
 
 
-	i = 0
-	for val in starts:
+	for i,val in enumerate(starts):
 		starts_times[i] = val[0]
 		starts_procs[i] = val[1]
-		i += 1
 
 
-	j = 0
-	for val in stops:
+	for j,val in enumerate(stops):
 		stops_times[j] = val[0]
 		stops_procs[j] = val[1]
-		j += 1
+
 
 
 	# save the lengths
@@ -269,13 +277,14 @@ def addPlotData(plotData, starts, stops):
 	stops_length = len(stops_times)
 	plotData_length = len(plotData)
 
+	# Tracer()()
+
 	run = True
 	i = 0 # reset
 	j = 0 # reset
 	k = 0 # reset
+
 	while run:
-
-
 
 		# get the next step
 		try:
@@ -296,7 +305,7 @@ def addPlotData(plotData, starts, stops):
 
 		# print "%s\t%s" % (start_current, stop_current)
 		# check if the end of both has been reached
-		if start_current == 9999999999999 and stop_current == 9999999999999:
+		if start_current >= 9999999999999 and stop_current >= 9999999999999:
 
 			# end the loop
 			break
@@ -342,7 +351,6 @@ def addPlotData(plotData, starts, stops):
 	# fill the rest of the plotData with the current level
 	plotData[k:] = level
 
-
 	return plotData
 
 
@@ -355,7 +363,7 @@ def addPlotData(plotData, starts, stops):
 
 
 
-def getRunningJobs(projId, startDate, endDate, starts, stops):
+def getRunningJobs(projId, startDate, endDate, starts, stops, jids):
 
 	global plotData
 	global currentDate
@@ -375,14 +383,17 @@ def getRunningJobs(projId, startDate, endDate, starts, stops):
 
 
 		# if it is a job line, get the start time and number of cores
-		match = re.search('(\d+-\d+-\d+T\d+:\d+:\d+)\s+\S+\s+\S+\s+(\S+)', line)
+		match = re.search('^ (\d+)\s.+\s(\d+-\d+-\d+T\d+:\d+:\d+)\s+\S+\s+\S+\s+(\S+)', line)
 		if match:
+
+
 
 			
 			# save the start time
-			start = int(datetime.strptime(match.groups()[0], "%Y-%m-%dT%H:%M:%S").strftime('%s'))
+			start = int(datetime.strptime(match.groups()[1], "%Y-%m-%dT%H:%M:%S").strftime('%s'))
 			stop = int(currentDate.strftime("%s"))
-			procs = int(match.groups()[1])
+			procs = int(match.groups()[2])
+			jid = int(match.groups()[0])
 
 			# next job if it does not overlap the requested window
 			if( (int(start) > int(endDate.strftime('%s')))):
@@ -400,7 +411,7 @@ def getRunningJobs(projId, startDate, endDate, starts, stops):
 
 	
 	# return the jobs
-	return [starts, stops]
+	return [starts, stops, jids]
 
 
 
@@ -410,7 +421,7 @@ def getRunningJobs(projId, startDate, endDate, starts, stops):
 
 
 # add the hours from a slurm log file
-def getHoursSlurmLog(slurmFile, starts, stops):
+def getHoursSlurmLog(slurmFile, starts, stops, jids):
 
 	global plotData
 	global options
@@ -428,11 +439,16 @@ def getHoursSlurmLog(slurmFile, starts, stops):
 	for line in iter(popen.stdout.readline, ""):
 
 		# get the start and end time of the job
-		match = re.search('start=(\d+) end=(\d+).+ procs=(\d+)', line)
+		match = re.search('jobid=(\d+).+ start=(\d+) end=(\d+).+ procs=(\d+)', line)
 
-		start =  int(match.groups()[0]) - windowStartEpoch
-		stop = int(match.groups()[1]) - windowStartEpoch
-		procs = int(match.groups()[2])
+		start =  int(match.groups()[1]) - windowStartEpoch
+		stop = int(match.groups()[2]) - windowStartEpoch
+		procs = int(match.groups()[3])
+		jid = int(match.groups()[0])
+
+		# skip the job if it is already added from another source
+		if jid in jids:
+			continue
 
 		# if it is a canceled job, don't append it
 		if start == stop:
@@ -445,11 +461,12 @@ def getHoursSlurmLog(slurmFile, starts, stops):
 
 		starts = np.append( starts, [[start, procs]], 0 )
 		stops = np.append( stops, [[stop, procs]], 0 )
+		jids[jid] = 1
 
 
 
 	# return the jobs
-	return [starts, stops]		
+	return [starts, stops, jids]		
 
 
 
@@ -524,7 +541,7 @@ def getPrioArrow(plotData, startDate, endDate):
 # calculate the core hour usage in the interval
 def getCoreHourUsage(plotData):
 
-	prio0 = time.time()
+	# prio0 = time.time()
 	global options
 
 
@@ -568,7 +585,6 @@ def plot():
 	# print the ending value to get the whole graph
 	print >>df, "%s\t0" % i 
 	df.close()
-
 
 	# send the cropped plotData to get the prioMark
 	# only if the current date is the end point. Not for custom ranges
@@ -718,7 +734,6 @@ parser.add_option("-e", "--end", action="store", type="string", dest="end", help
 
 # get the current date
 currentDate = datetime.today() #.replace(hour=23, minute=59, second=59, microsecond=0)
-
 
 #### CHECK INPUT ####
 checkInput(options)
@@ -870,7 +885,10 @@ else:
 
 
 
-
+# get the current date
+# currentDate = datetime.today().replace(hour=22, minute=59, second=59, microsecond=0)
+# startDate = (currentDate - timedelta(days=int(30))).replace(hour=0, minute=0, second=0)
+# endDate = currentDate
 
 
 # print "init"
@@ -886,31 +904,38 @@ db = connectDB()
 cur = db.cursor()
 
 
-
 #### PAST JOBS ####
 # get finished jobs
 # print "get finished"
-[starts, stops] = getJobs(cur, startDate, endDate, projId)
+[starts, stops, jids] = getJobs(cur, startDate, endDate, projId)
 
+
+
+#### YESTERDAYS'S JOBS #### 
+# get jobs that has finished yesterday, since the db was updated
+# print "get finished today"
+# only if the time is in the interval between midnight and when the db is updated
+now = datetime.now().time()
+if now>= time(00,00) and now <= time(06,30):
+	[starts, stops, jids] = getHoursSlurmLog((currentDate-timedelta(days=1)).strftime("%Y-%m-%d"), starts, stops, jids)
 
 
 #### TODAY'S JOBS ####
-# get jobs that has finished today, since midnight, when the db was updated
+# get jobs that has finished today, since the db was updated
 # print "get finished today"
-[starts, stops] = getHoursSlurmLog(currentDate.strftime("%Y-%m-%d"), starts, stops)
+[starts, stops, jids] = getHoursSlurmLog(currentDate.strftime("%Y-%m-%d"), starts, stops, jids)
 
 
 #### RUNNING JOBS ####
 # print "get running"
 # get currently running jobs
-[starts, stops] = getRunningJobs(projId, startDate, endDate, starts, stops)
+[starts, stops, jids] = getRunningJobs(projId, startDate, endDate, starts, stops, jids)
 
 #### SUMMARIZE THE DATA ####
 # summarize the jobs
 # print "summarize"
 ymax = 0 # to avoid calling np.amax() twice
 plotData = addPlotData(plotData, starts, stops)
-
 
 #### PLOT THE DATA ####
 # plot the data
