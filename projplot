@@ -36,7 +36,7 @@ version = "2015-08-31"
 # connect to the database
 def connectDB():
 
-	return  lite.connect('/proj/b2013023/statistics/general/general.sqlite')
+	return  lite.connect('/sw/share/compstore/db_files/general/general.sqlite')
 
 
 
@@ -645,8 +645,8 @@ def plot():
 
 
 	# run gnuplot and print the result to the terminal
-	# print 'gnuplot44', "/tmp/projplot.%s.gnu" % randomName
-	popen = subprocess.Popen(['gnuplot44', "/tmp/projplot.%s.gnu" % randomName], stdout=subprocess.PIPE)
+	# print 'gnuplot', "/tmp/projplot.%s.gnu" % randomName
+	popen = subprocess.Popen(['gnuplot', "/tmp/projplot.%s.gnu" % randomName], stdout=subprocess.PIPE)
 	for line in iter(popen.stdout.readline, ""):
 	    print line,
 
