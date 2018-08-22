@@ -675,7 +675,7 @@ def plot():
 
 usage = """Usage: %prog -A <proj-id> [options]
 
-More details: http://www.uppmax.uu.se/plotting-your-core-hour-usage
+More details: https://uppmax.uu.se/support/user-guides/plotting-your-core-hour-usage/
 
 Example runs:
 
